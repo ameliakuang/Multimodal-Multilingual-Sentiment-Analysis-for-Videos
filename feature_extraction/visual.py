@@ -4,7 +4,7 @@ import numpy as np
 
 #assuming there is a running openface container called "openface"
 #assuming $TMP has been mounted to the openface container
-TMP='/tmp' #'/dev/shm'
+TMP='/dev/shm' #'/tmp' 
 SAMPLE_INTERVAL=0.1
 MAX_COUNT=20
 
@@ -20,7 +20,7 @@ def video2frame(video_path, interval=SAMPLE_INTERVAL, tstart=0, max_count=MAX_CO
     success,image = video_capture.read()
     while success:
         cv2.imwrite(os.path.join(save_to,"%s_frame%d_timestamp%.3f.jpg" %(name,c,t)), image)     # save frame as JPEG file 
-        print('New frame: %s_frame%d.jpg'%(name,c), success)
+        #print('New frame: %s_frame%d.jpg'%(name,c), success)
         c += 1
         t += interval
         video_capture.set(cv2.CAP_PROP_POS_MSEC,t*1000)
@@ -48,10 +48,24 @@ def openface_a_video(video_path, container_id='openface'):
     with tempfile.TemporaryDirectory(dir=TMP) as tpdir:
         video2frame(video_path, 0.1, save_to=tpdir)
         result_dir = os.path.join(tpdir,'openfaced')
-        os.system("docker exec %s /home/openface-build/build/bin/FaceLandmarkImg -fdir %s -out_dir %s"%(container_id,tpdir,result_dir))
+        os.system("docker exec %s /home/openface-build/build/bin/FaceLandmarkImg -fdir %s -out_dir %s  > /dev/null"%(container_id,tpdir,result_dir))
         ret = process_openface_output(result_dir)
         #files created by container cannot be deleted by python file manager, so delete them by docker exec
-        os.system("docker exec %s rm -r %s"%(container_id, result_dir))         
+        os.system("docker exec %s rm -r %s  > /dev/null"%(container_id, result_dir))         
         
     return ret
 
+def merge_videos(video_list, container_id='openface', preprocess=None, save_to='test.npz'):
+    ret = {'key':[],'features':[]}
+    for v in video_list:
+        name = Path(v).stem
+        name = name[:12] + name[12:].split("_")[0]
+        openfaced = openface_a_video(v, container_id=container_id)
+        if preprocess:
+            openfaced = preprocess(openfaced)
+        ret['key'].append(name)
+        ret['features'].append(openfaced)
+        
+    ret = {k:np.array(v) for k,v in ret.items()}
+    np.savez(save_to, **ret)
+    return ret
